@@ -52,7 +52,9 @@ async function getBrowser() {
           _browser = await puppeteer.launch({
             executablePath: CONFIG.CHROMIUM_PATH,
             headless: CONFIG.HEADLESS,
-            args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--no-zygote", "--disable-gpu"]
+            // Headful (Xvfb) modda gerçek bir pencere boyutu ver: disable-devtool'un
+            // outer/inner boyut farkı kontrolü doğal olarak geçer.
+            args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--no-zygote", "--disable-gpu", "--window-size=1280,1024"]
           });
           _browser.on('disconnected', () => { _browser = null; });
       } catch (err) {

@@ -9,13 +9,15 @@ try {
 }
 
 const CONFIG = {
-  VERSION: "2.3.7",
+  VERSION: "2.3.8",
   BASE_URL: opts.base_url || "https://dizipal1558.com",
   MIRROR_URL: opts.mirror_url || "https://dizipal.bid",
   PORT: Number(process.env.PORT || opts.port || 7860),
   TIMEOUT_MS: Number(opts.timeout_ms || 45000),
   CACHE_TTL_MS: Number(opts.cache_ttl_hours || 12) * 60 * 60 * 1000,
-  HEADLESS: opts.headless !== false ? "new" : false,
+  // Eklenti Xvfb sanal ekranında HEADFUL çalışır (headless tespitini geçersiz
+  // kılmak için). Varsayılan headful; yalnızca açıkça headless:true denirse headless.
+  HEADLESS: opts.headless === true ? "new" : false,
   OMDB_KEY: opts.omdb_api_key || "trilogy",
   TMDB_KEY: opts.tmdb_api_key || "",
   CHROMIUM_PATH: process.env.CHROMIUM_PATH || "/usr/bin/chromium",

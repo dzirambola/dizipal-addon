@@ -1,7 +1,7 @@
 FROM debian:bookworm-slim
 
 LABEL maintainer="fusion-addon"
-LABEL description="Fusion Media Center – Dizipal Scraper Addon (v2.3.3)"
+LABEL description="Fusion Media Center – Dizipal Scraper Addon (v2.3.8)"
 
 # ── 1. Bağımlılıklar & Node.js 20 LTS (NodeSource) ───────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -29,6 +29,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpangocairo-1.0-0 \
     fonts-liberation \
     fonts-noto \
+    xvfb \
+    xauth \
+    libgtk-3-0 \
+    libx11-xcb1 \
+    libxss1 \
+    libxtst6 \
     && rm -rf /var/lib/apt/lists/*
 
 # ── 2. Güvenlik: Non-root kullanıcı (pptruser) ──────────────────────────────
@@ -54,4 +60,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -sf http://localhost:7860/manifest.json || exit 1
 
 EXPOSE 7860
-CMD ["node", "server.js"]
+# Headful Chromium'u sanal ekranda (Xvfb) çalıştır. Headless tespitini (disable-devtool
+# vb.) kökten geçersiz kılar; tarayıcı gerçek bir GUI oturumu gibi görünür.
+CMD ["xvfb-run", "-a", "--server-args=-screen 0 1280x1024x24 -ac -nolisten tcp", "node", "server.js"]

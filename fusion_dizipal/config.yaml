@@ -1,6 +1,6 @@
 name: "Dizipal"
 description: "Dizipal içerik görüntüleme add-on"
-version: "2.3.7"
+version: "2.3.8"
 slug: fusion_dizipal
 
 arch:
@@ -28,7 +28,7 @@ options:
   mirror_url: "https://dizipal.bid"
   port: 7860
   cache_ttl_hours: 12
-  headless: true
+  headless: false
   timeout_ms: 45000
   omdb_api_key: ""
   tmdb_api_key: ""

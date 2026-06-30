@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.8] - 2026-06-30
+### Changed
+- **Headful Chromium under Xvfb (architectural anti-bot fix)**: The `disable-devtool` protection on dizipal1559 kept defeating the headless bypasses (window-size mock, service-worker block, settle wait) specifically in the HA Debian-chromium environment, redirecting the page mid-scrape and throwing `Execution context was destroyed`. Rather than chase another headless-detection vector, the add-on now runs Chromium **headful** inside a virtual display (Xvfb), which makes the browser indistinguishable from a real GUI session and neutralizes headless heuristics at the root.
+  - Dockerfile: install `xvfb`, `xauth`, and headful GTK/X11 libs (`libgtk-3-0`, `libx11-xcb1`, `libxss1`, `libxtst6`); launch via `xvfb-run -a ... node server.js`.
+  - Default `headless` option flipped to `false`; launch passes `--window-size=1280,1024`.
+  - Note: the `dizipal.bid` mirror is unreachable from some HA networks (15s timeouts); the primary auto-domain (dizipal1559) path is what streaming relies on.
+
 ## [2.3.7] - 2026-06-30
 ### Fixed
 - **Search "Execution context was destroyed" on HA (domain rotated to dizipal1559)**: In the Home Assistant environment the `disable-devtool` script redirects the page ~1-2s after load — while the AJAX search was focusing/typing into `#searchInp` — destroying Puppeteer's execution context and failing the attempt. Added a 1.2s settle + liveness re-check before interacting (so the redirect fires and is caught as about:blank first), made `searchOnce` fully defensive (never throws on a destroyed context — returns empty so retry engages), and raised search attempts from 2 to 3. Search now resolves on the first attempt instead of burning one to the redirect.
