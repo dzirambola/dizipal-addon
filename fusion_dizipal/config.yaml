@@ -1,0 +1,44 @@
+name: "Dizipal"
+description: "Dizipal içerik görüntüleme add-on"
+version: "2.3.6"
+slug: fusion_dizipal
+
+arch:
+  - aarch64
+  - armv7
+  - amd64
+
+startup: services
+boot: auto
+host_network: false
+
+ports:
+  7860/tcp: 7860
+
+apparmor: true
+ingress: true
+ingress_port: 7860
+ingress_stream: true
+
+panel_icon: mdi:play-box-outline
+panel_title: Dizipal
+
+options:
+  base_url: "https://dizipal1558.com"
+  mirror_url: "https://dizipal.bid"
+  port: 7860
+  cache_ttl_hours: 12
+  headless: true
+  timeout_ms: 45000
+  omdb_api_key: ""
+  tmdb_api_key: ""
+
+schema:
+  base_url: str
+  mirror_url: str?
+  port: int(1024,65535)
+  cache_ttl_hours: int(1,72)
+  headless: bool
+  timeout_ms: int(5000,60000)
+  omdb_api_key: str
+  tmdb_api_key: str
