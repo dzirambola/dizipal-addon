@@ -1,6 +1,6 @@
 {
   "name": "fusion-dizipal-addon",
-  "version": "2.3.6",
+  "version": "2.3.7",
   "description": "Fusion Media Center addon – Node 20 + Puppeteer",
   "main": "server.js",
   "engines": {

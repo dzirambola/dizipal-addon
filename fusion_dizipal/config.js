@@ -9,7 +9,7 @@ try {
 }
 
 const CONFIG = {
-  VERSION: "2.3.6",
+  VERSION: "2.3.7",
   BASE_URL: opts.base_url || "https://dizipal1558.com",
   MIRROR_URL: opts.mirror_url || "https://dizipal.bid",
   PORT: Number(process.env.PORT || opts.port || 7860),

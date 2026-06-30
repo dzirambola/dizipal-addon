@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.3.7] - 2026-06-30
+### Fixed
+- **Search "Execution context was destroyed" on HA (domain rotated to dizipal1559)**: In the Home Assistant environment the `disable-devtool` script redirects the page ~1-2s after load — while the AJAX search was focusing/typing into `#searchInp` — destroying Puppeteer's execution context and failing the attempt. Added a 1.2s settle + liveness re-check before interacting (so the redirect fires and is caught as about:blank first), made `searchOnce` fully defensive (never throws on a destroyed context — returns empty so retry engages), and raised search attempts from 2 to 3. Search now resolves on the first attempt instead of burning one to the redirect.
+
 ## [2.3.6] - 2026-06-30
 ### Fixed
 - **Empty Catalog & Search (root cause: type misclassification)**: Movies never appeared in the catalog because content type was detected with `a.href.includes('dizi')` — but the domain itself (`dizipal.bid` / `dizipal1558`) contains the substring "dizi", so *every* item was classified as a series. Type detection now runs on the URL **pathname** (`/dizi/`, `/series/`, `sezon`, `bolum`), so movies are correctly identified.

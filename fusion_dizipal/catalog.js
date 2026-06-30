@@ -161,7 +161,18 @@ async function searchOnce(page, base, query) {
     const ok = await gotoResilient(page, base, `Search`);
     if (!ok) return [];
 
-    const hasAjaxSearch = await page.evaluate(() => !!document.querySelector("#searchInp"));
+    // disable-devtool yönlendirmesi etkileşim sırasında çalışma bağlamını yok
+    // edebiliyor ("Execution context was destroyed"). Etkileşimden önce sayfanın
+    // yerleşmesini bekle; yönlendirme olacaksa burada olsun ve about:blank yakalansın.
+    await new Promise(r => setTimeout(r, 1200));
+    let hasAjaxSearch;
+    try {
+        if (page.url() === "about:blank") return [];
+        hasAjaxSearch = await page.evaluate(() => !!document.querySelector("#searchInp"));
+    } catch (e) {
+        log(`[Search] Sayfa bağlamı etkileşimden önce kayboldu (${base}): ${e.message}`, "warn");
+        return [];
+    }
 
     // Hangi selektörle ve hangi kapsamda sonuç çıkaracağımız: AJAX akışında
     // SADECE #searchAjaxCallback kutusu; WordPress GET akışında tüm sayfa.
@@ -201,7 +212,12 @@ async function searchOnce(page, base, query) {
     }
 
     // Katalog ile aynı çıkarım mantığı (tek kaynak, drift yok).
-    return page.evaluate(extractItems, resultSelector, "Dizipal Arama Sonucu", CONFIG.LOGO_URL);
+    try {
+        return await page.evaluate(extractItems, resultSelector, "Dizipal Arama Sonucu", CONFIG.LOGO_URL);
+    } catch (e) {
+        log(`[Search] Sonuç çıkarımı sırasında bağlam kayboldu (${base}): ${e.message}`, "warn");
+        return [];
+    }
 }
 
 async function scrapeSearch(query, type) {
@@ -213,7 +229,7 @@ async function scrapeSearch(query, type) {
     const browser = await getBrowser();
 
     for (const base of bases) {
-        for (let attempt = 1; attempt <= 2; attempt++) {
+        for (let attempt = 1; attempt <= 3; attempt++) {
             const page = await browser.newPage();
             try {
                 await setupPage(page);
