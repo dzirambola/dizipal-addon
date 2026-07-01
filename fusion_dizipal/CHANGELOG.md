@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.4.2] - 2026-07-01
+### Fixed
+- **Reliably pin the whole chain to the working `.bid` mirror**: v2.4.1's "is the main domain challenged?" probe was unreliable — the main domain's homepage often loads clean at probe time, so it stayed on `dizipal1559`, then failed during the actual scrape (`Yayın linki bulunamadı`). Replaced the flaky challenge check with a positive **content verification**: auto-domain loads `mirror/diziler/` (up to 3 tries, 30s each to absorb cold-start slowness on headful/ARM) and, if it returns real content links, pins `BASE_URL` to the mirror for the whole chain. Verified end-to-end locally: auto-domain → `BASE=.bid` → search resolves → scrapeMeta returns episodes → scrapeM3U8 captures a valid `master.m3u8`.
+
 ## [2.4.1] - 2026-07-01
 ### Fixed
 - **Route the entire streaming chain to the working mirror when the main domain is Cloudflare-walled**: v2.4.0 fixed catalog via .bid, but streaming still failed because meta + episode-resolution + m3u8 scraping all use `CONFIG.BASE_URL`, which auto-domain set to the Cloudflare-challenged main domain (dizipal1559). Verified locally that `.bid` fully serves streaming (scrapeMeta resolves 18 episodes via the `/dizi/` WordPress fallback, and scrapeM3U8 captures a valid `master.m3u8`). Auto-domain now probes the discovered main domain for a Cloudflare challenge and, if challenged (or unreachable), sets `BASE_URL` to the mirror — so the whole chain (catalog, search, meta, m3u8, proxy) runs on the domain that actually works. Environments where the main domain is reachable are unaffected (verified: no false-positive fallback).

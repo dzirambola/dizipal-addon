@@ -321,26 +321,27 @@ async function findCurrentDizipalDomain() {
             log(`[Auto-Domain] Yeni adres bulunamadı, mevcut adres kullanılıyor.`, "warn");
         }
 
-        // Bulunan ana domain Cloudflare managed challenge veriyorsa (bazı ağlar/ISS'ler),
-        // TÜM zincir (katalog, arama, meta, m3u8 — hepsi CONFIG.BASE_URL kullanır) çalışan
-        // .bid mirror'ına düşürülür. Böylece streaming CF duvarına takılmaz.
+        // TÜM zincir (katalog, arama, meta, m3u8, proxy) tek bir CONFIG.BASE_URL okur.
+        // Ana rotasyon domaini (dizipalNNN) bazı ağlarda Cloudflare managed challenge
+        // veriyor ve ana sayfa temiz açılsa bile scrape sırasında about:blank'e çöküyor;
+        // "challenge var mı" kontrolü bu yüzden güvenilmez. Bunun yerine STABIL .bid
+        // mirror'ının GERÇEKTEN içerik döndürdüğünü doğrulayıp tüm zinciri ona bağlarız.
         if (CONFIG.MIRROR_URL && CONFIG.BASE_URL !== CONFIG.MIRROR_URL) {
-            try {
-                await page.goto(CONFIG.BASE_URL, { waitUntil: "domcontentloaded", timeout: 20000 });
-                await new Promise(r => setTimeout(r, 1500));
-                const challenged = await page.evaluate(() =>
-                    !!(window._cf_chl_opt || /just a moment|challenge-platform|cf-browser-verification/i.test(
-                        document.title + (document.body ? document.body.innerText.slice(0, 200) : "")))
-                ).catch(() => true);
-                if (challenged || page.url() === "about:blank") {
-                    log(`[Auto-Domain] Ana domain (${CONFIG.BASE_URL}) Cloudflare challenge veriyor → mirror'a düşülüyor: ${CONFIG.MIRROR_URL}`, "warn");
-                    CONFIG.BASE_URL = CONFIG.MIRROR_URL;
-                } else {
-                    log(`[Auto-Domain] Ana domain doğrulandı (challenge yok): ${CONFIG.BASE_URL}`, "system");
-                }
-            } catch (e) {
-                log(`[Auto-Domain] Ana domain doğrulanamadı (${e.message}) → mirror kullanılacak: ${CONFIG.MIRROR_URL}`, "warn");
+            let mirrorOk = false;
+            for (let i = 0; i < 3 && !mirrorOk; i++) {
+                try {
+                    await page.goto(CONFIG.MIRROR_URL + "/diziler/", { waitUntil: "domcontentloaded", timeout: 30000 });
+                    await new Promise(r => setTimeout(r, 1000));
+                    mirrorOk = await page.evaluate(() =>
+                        document.querySelectorAll('a[href*="/dizi/"], a[href*="/series/"]').length > 0
+                    ).catch(() => false);
+                } catch (e) { /* soğuk başlangıç yavaş olabilir, tekrar dene */ }
+            }
+            if (mirrorOk) {
+                log(`[Auto-Domain] Mirror (${CONFIG.MIRROR_URL}) içerik doğrulandı → tüm zincir için tercih ediliyor.`, "system");
                 CONFIG.BASE_URL = CONFIG.MIRROR_URL;
+            } else {
+                log(`[Auto-Domain] Mirror doğrulanamadı, ana domain kullanılıyor: ${CONFIG.BASE_URL}`, "warn");
             }
         }
 
