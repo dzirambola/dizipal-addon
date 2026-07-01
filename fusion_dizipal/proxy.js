@@ -9,8 +9,20 @@ const { cacheGet } = require('./cache');
 // engelliyor. Varsa CDN isteklerini bununla yaparız; yoksa Node fetch/https'e düşeriz.
 const CURL_BIN = process.env.CURL_IMPERSONATE || "/opt/curl-impersonate/curl_chrome116";
 const CURL_OK = (() => { try { return fs.existsSync(CURL_BIN); } catch (e) { return false; } })();
-if (CURL_OK) log(`[Proxy] curl-impersonate aktif: ${CURL_BIN}`, "system");
-else log(`[Proxy] curl-impersonate bulunamadı, Node fetch kullanılacak`, "warn");
+if (CURL_OK) {
+    log(`[Proxy] curl-impersonate DOSYASI var: ${CURL_BIN} — fonksiyonel test yapılıyor...`, "system");
+    // Gerçekten çalışıyor mu? (dosya var ama .so/arch sorunu olabilir)
+    try {
+        const t = spawn(CURL_BIN, ["--version"]);
+        let vout = "";
+        t.stdout.on("data", d => vout += d.toString());
+        t.stderr.on("data", d => vout += d.toString());
+        t.on("error", (e) => log(`[Proxy] curl-impersonate ÇALIŞMIYOR: ${e.message} → Node fetch'e düşülecek`, "error"));
+        t.on("close", (code) => log(`[Proxy] curl-impersonate test: exit=${code} | ${(vout.split("\n")[0] || "").slice(0, 80)}`, code === 0 ? "system" : "error"));
+    } catch (e) { log(`[Proxy] curl-impersonate spawn hatası: ${e.message}`, "error"); }
+} else {
+    log(`[Proxy] curl-impersonate DOSYASI YOK (${CURL_BIN}) → Node fetch kullanılacak (CDN muhtemelen 403)`, "warn");
+}
 
 function curlHeaderArgs(headers) {
     const a = [];
@@ -21,14 +33,20 @@ function curlHeaderArgs(headers) {
 // Playlist (metin) — tamponla, {ok, text} döndür.
 function curlText(url, headers) {
     return new Promise((resolve) => {
-        const ps = spawn(CURL_BIN, ["-sS", "-L", "--max-time", "25", ...curlHeaderArgs(headers), url]);
+        const ps = spawn(CURL_BIN, ["-sS", "-L", "--max-time", "25", "-w", "\\n__HTTP__%{http_code}", ...curlHeaderArgs(headers), url]);
         const out = [];
+        let err = "";
         ps.stdout.on("data", (d) => out.push(d));
-        ps.stderr.on("data", () => {});
-        ps.on("error", () => resolve({ ok: false, text: "" }));
-        ps.on("close", () => {
-            const text = Buffer.concat(out).toString("utf8");
-            resolve({ ok: text.includes("#EXTM3U"), text });
+        ps.stderr.on("data", (d) => err += d.toString());
+        ps.on("error", (e) => { log(`[Proxy] curl playlist spawn hatası: ${e.message}`, "error"); resolve({ ok: false, text: "" }); });
+        ps.on("close", (code) => {
+            let text = Buffer.concat(out).toString("utf8");
+            const m = text.match(/\n__HTTP__(\d+)\s*$/);
+            const status = m ? m[1] : "?";
+            text = text.replace(/\n__HTTP__\d+\s*$/, "");
+            const ok = text.includes("#EXTM3U");
+            if (!ok) log(`[Proxy] curl playlist başarısız: HTTP ${status}, exit=${code}, err=${err.slice(0, 120)}`, "warn");
+            resolve({ ok, text });
         });
     });
 }
