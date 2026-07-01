@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.4.8] - 2026-07-01
+### Changed
+- **Switch CDN bypass from the curl-impersonate binary to curl_cffi (Python)**: v2.4.7 (diagnostic) confirmed the curl-impersonate binary loads (curl 8.1.1 BoringSSL, aarch64) but its `curl_chrome116` wrapper fails on real requests with `exit=43` (CURLE_BAD_FUNCTION_ARGUMENT) — a wrapper/flag incompatibility in that build. Replaced it with `curl_cffi` (the well-maintained Python binding to curl-impersonate, with aarch64 wheels): the Dockerfile installs `python3` + `curl_cffi`, and the proxy shells out to `cdn_fetch.py` (impersonate=chrome124) for every playlist + segment, replaying the captured Referer/Origin/Cookie. Startup self-test logs the curl_cffi version; falls back to Node fetch if unavailable.
+
 ## [2.4.6] - 2026-07-01
 ### Added
 - **curl-impersonate (Chrome JA3) for CDN fetches — the actual anti-hotlink bypass**: v2.4.5 confirmed the stream CDN blocks by TLS fingerprint, so Node/normal-curl always got 403. The Dockerfile now installs `curl-impersonate` (Chrome build, per-arch: x86_64/aarch64/armv7) and the proxy fetches every playlist + segment through it (replaying the captured Referer/Origin/Cookie), so the CDN sees a genuine Chrome TLS handshake. Playlists are still rewritten so segments route back through the proxy; if curl-impersonate isn't present (unsupported arch / download failed) the proxy falls back to Node fetch. This is the "⇄ Proxy" stream — expected to finally play the anti-hotlink CDN.

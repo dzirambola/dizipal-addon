@@ -5,55 +5,46 @@ const { log, CONFIG } = require("./config");
 const { scrapeM3U8, fetchTitleInfo, toSlug } = require("./scraper");
 const { cacheGet } = require('./cache');
 
-// curl-impersonate (Chrome JA3 taklidi): CDN'ler Node/normal-curl TLS parmak izini
-// engelliyor. Varsa CDN isteklerini bununla yaparız; yoksa Node fetch/https'e düşeriz.
-const CURL_BIN = process.env.CURL_IMPERSONATE || "/opt/curl-impersonate/curl_chrome116";
-const CURL_OK = (() => { try { return fs.existsSync(CURL_BIN); } catch (e) { return false; } })();
+// CDN'ler (uk-traffic vb.) Node/normal-curl'ün TLS/JA3 parmak izini engelliyor.
+// curl_cffi (Python, Chrome TLS taklidi) ile CDN'e Chrome gibi bağlanırız.
+// cdn_fetch.py: <url> <headers-json> [range] → gövdeyi stdout'a akıtır, hata → exit≠0.
+const PY_FETCH = process.env.CDN_FETCH || "/app/cdn_fetch.py";
+const CURL_OK = (() => { try { return fs.existsSync(PY_FETCH); } catch (e) { return false; } })();
 if (CURL_OK) {
-    log(`[Proxy] curl-impersonate DOSYASI var: ${CURL_BIN} — fonksiyonel test yapılıyor...`, "system");
-    // Gerçekten çalışıyor mu? (dosya var ama .so/arch sorunu olabilir)
+    log(`[Proxy] cdn_fetch (curl_cffi) bulundu: ${PY_FETCH} — test ediliyor...`, "system");
     try {
-        const t = spawn(CURL_BIN, ["--version"]);
-        let vout = "";
+        const t = spawn("python3", ["-c", "import curl_cffi,sys; sys.stdout.write('curl_cffi '+getattr(curl_cffi,'__version__','?'))"]);
+        let vout = "", verr = "";
         t.stdout.on("data", d => vout += d.toString());
-        t.stderr.on("data", d => vout += d.toString());
-        t.on("error", (e) => log(`[Proxy] curl-impersonate ÇALIŞMIYOR: ${e.message} → Node fetch'e düşülecek`, "error"));
-        t.on("close", (code) => log(`[Proxy] curl-impersonate test: exit=${code} | ${(vout.split("\n")[0] || "").slice(0, 80)}`, code === 0 ? "system" : "error"));
-    } catch (e) { log(`[Proxy] curl-impersonate spawn hatası: ${e.message}`, "error"); }
+        t.stderr.on("data", d => verr += d.toString());
+        t.on("error", (e) => log(`[Proxy] python3 ÇALIŞMIYOR: ${e.message} → Node fetch'e düşülecek`, "error"));
+        t.on("close", (code) => log(`[Proxy] cdn_fetch test: exit=${code} | ${(vout || verr).split("\n")[0].slice(0, 90)}`, code === 0 ? "system" : "error"));
+    } catch (e) { log(`[Proxy] cdn_fetch spawn hatası: ${e.message}`, "error"); }
 } else {
-    log(`[Proxy] curl-impersonate DOSYASI YOK (${CURL_BIN}) → Node fetch kullanılacak (CDN muhtemelen 403)`, "warn");
-}
-
-function curlHeaderArgs(headers) {
-    const a = [];
-    for (const k of Object.keys(headers || {})) { if (headers[k]) a.push("-H", `${k}: ${headers[k]}`); }
-    return a;
+    log(`[Proxy] cdn_fetch YOK (${PY_FETCH}) → Node fetch kullanılacak (CDN muhtemelen 403)`, "warn");
 }
 
 // Playlist (metin) — tamponla, {ok, text} döndür.
 function curlText(url, headers) {
     return new Promise((resolve) => {
-        const ps = spawn(CURL_BIN, ["-sS", "-L", "--max-time", "25", "-w", "\\n__HTTP__%{http_code}", ...curlHeaderArgs(headers), url]);
+        const ps = spawn("python3", [PY_FETCH, url, JSON.stringify(headers || {})]);
         const out = [];
         let err = "";
         ps.stdout.on("data", (d) => out.push(d));
         ps.stderr.on("data", (d) => err += d.toString());
-        ps.on("error", (e) => { log(`[Proxy] curl playlist spawn hatası: ${e.message}`, "error"); resolve({ ok: false, text: "" }); });
+        ps.on("error", (e) => { log(`[Proxy] cdn_fetch playlist spawn hatası: ${e.message}`, "error"); resolve({ ok: false, text: "" }); });
         ps.on("close", (code) => {
-            let text = Buffer.concat(out).toString("utf8");
-            const m = text.match(/\n__HTTP__(\d+)\s*$/);
-            const status = m ? m[1] : "?";
-            text = text.replace(/\n__HTTP__\d+\s*$/, "");
-            const ok = text.includes("#EXTM3U");
-            if (!ok) log(`[Proxy] curl playlist başarısız: HTTP ${status}, exit=${code}, err=${err.slice(0, 120)}`, "warn");
+            const text = Buffer.concat(out).toString("utf8");
+            const ok = code === 0 && text.includes("#EXTM3U");
+            if (!ok) log(`[Proxy] cdn_fetch playlist başarısız: exit=${code}, err=${err.slice(0, 120)}`, "warn");
             resolve({ ok, text });
         });
     });
 }
 
 // Segment (binary) — stdout'u doğrudan response'a akıt.
-function curlStream(url, headers, res) {
-    const ps = spawn(CURL_BIN, ["-sS", "-L", "--max-time", "60", ...curlHeaderArgs(headers), url]);
+function curlStream(url, headers, res, range) {
+    const ps = spawn("python3", [PY_FETCH, url, JSON.stringify(headers || {}), range || ""]);
     let started = false;
     ps.stdout.on("data", (d) => { if (!started) { started = true; if (!res.headersSent) res.writeHead(200); } res.write(d); });
     ps.stderr.on("data", () => {});
@@ -268,11 +259,9 @@ async function proxyStream(req, res) {
         }
     }
 
-    // SEGMENT (.ts vb.): curl-impersonate varsa onunla akıt (JA3 gerekli).
+    // SEGMENT (.ts vb.): curl_cffi varsa onunla akıt (JA3 gerekli).
     if (CURL_OK) {
-        const h = cdnHeaders(targetUrl);
-        if (req.headers.range) h["Range"] = req.headers.range;
-        return curlStream(targetUrl, h, res);
+        return curlStream(targetUrl, cdnHeaders(targetUrl), res, req.headers.range);
     }
 
     const parsedUrl = new URL(targetUrl);

@@ -1,7 +1,7 @@
 FROM debian:bookworm-slim
 
 LABEL maintainer="fusion-addon"
-LABEL description="Fusion Media Center – Dizipal Scraper Addon (v2.4.6)"
+LABEL description="Fusion Media Center – Dizipal Scraper Addon (v2.4.8)"
 
 # ── 1. Bağımlılıklar & Node.js 20 LTS (NodeSource) ───────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -37,31 +37,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxtst6 \
     && rm -rf /var/lib/apt/lists/*
 
-# ── 1b. curl-impersonate (Chrome TLS/JA3 taklidi) ────────────────────────────
+# ── 1b. curl_cffi (Chrome TLS/JA3 taklidi) ───────────────────────────────────
 # Yayın CDN'i (uk-traffic vb.) Node/normal curl'ün TLS parmak izini engelliyor.
-# curl-impersonate Chrome'un TLS el sıkışmasını birebir taklit ederek 403'ü aşar.
-RUN set -e; \
-    ARCH="$(uname -m)"; \
-    case "$ARCH" in \
-      x86_64)  CI="x86_64-linux-gnu" ;; \
-      aarch64) CI="aarch64-linux-gnu" ;; \
-      armv7l)  CI="arm-linux-gnueabihf" ;; \
-      *)       CI="" ;; \
-    esac; \
-    if [ -n "$CI" ]; then \
-      curl -fsSL -o /tmp/ci.tar.gz "https://github.com/lwthiker/curl-impersonate/releases/download/v0.6.1/curl-impersonate-v0.6.1.${CI}.tar.gz" \
-      && mkdir -p /opt/curl-impersonate \
-      && tar -xzf /tmp/ci.tar.gz -C /opt/curl-impersonate \
-      && chmod +x /opt/curl-impersonate/* \
-      && rm -f /tmp/ci.tar.gz \
-      && (cp /opt/curl-impersonate/*.so* /usr/lib/ 2>/dev/null || true) \
-      && ldconfig || echo "curl-impersonate kurulamadı (arch=$ARCH), Node fetch'e düşülecek"; \
-    else echo "curl-impersonate bu arch için yok ($ARCH), Node fetch kullanılacak"; fi
-# Wrapper (curl_chrome116) tüm JA3/cipher/H2 flag'lerini uygular; PATH'e ekle ki
-# içinden `curl-impersonate-chrome`'u bulabilsin.
-ENV PATH="/opt/curl-impersonate:${PATH}"
-ENV CURL_IMPERSONATE=/opt/curl-impersonate/curl_chrome116
-ENV LD_LIBRARY_PATH=/opt/curl-impersonate
+# curl_cffi (Python) Chrome'un TLS el sıkışmasını birebir taklit ederek 403'ü aşar.
+# curl-impersonate binary'sinin wrapper/flag uyumsuzluğu (exit 43) yerine güvenilir.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip \
+    && pip3 install --no-cache-dir --break-system-packages "curl_cffi>=0.7,<0.13" \
+    && rm -rf /var/lib/apt/lists/*
+ENV CDN_FETCH=/app/cdn_fetch.py
 
 # ── 2. Güvenlik: Non-root kullanıcı (pptruser) ──────────────────────────────
 RUN groupadd -r pptruser && useradd -r -g pptruser -G audio,video pptruser \
@@ -73,6 +56,7 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev
 COPY *.js ./
+COPY cdn_fetch.py ./
 COPY manifest.json ./
 RUN chown -R pptruser:pptruser /app
 
