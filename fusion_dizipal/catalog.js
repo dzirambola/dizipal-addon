@@ -171,71 +171,48 @@ async function scrapeCatalog(type) {
     return [];
 }
 
-// Tek bir domain üzerinde aramayı dener (AJAX veya WordPress GET). Sonuç dizisi döner.
+// Tek bir domain üzerinde aramayı dener. WordPress GET (/?s=) BİRİNCİL yoldur:
+// doğrudan sonuç sayfasına gider, ağır ana sayfayı (.bid/ ~6800 link, timeout
+// kaynağı) HİÇ yüklemez. Sonuç boşsa ve site custom AJAX layout ise (#searchInp)
+// yedek olarak AJAX araması denenir.
 async function searchOnce(page, base, query) {
-    // TANI: ana çerçeve her gezindiğinde nereye gittiğini logla (redirect hedefi).
-    page.on('framenavigated', (frame) => {
-        if (frame === page.mainFrame()) log(`[Search][nav] → ${frame.url()}`, "system");
-    });
-
-    const ok = await gotoResilient(page, base, `Search`);
-    if (!ok) return [];
-
-    // disable-devtool yönlendirmesi etkileşim sırasında çalışma bağlamını yok
-    // edebiliyor ("Execution context was destroyed"). Etkileşimden önce sayfanın
-    // yerleşmesini bekle; yönlendirme olacaksa burada olsun ve about:blank yakalansın.
-    await new Promise(r => setTimeout(r, 1200));
-    let hasAjaxSearch;
-    try {
-        if (page.url() === "about:blank") return [];
-        hasAjaxSearch = await page.evaluate(() => !!document.querySelector("#searchInp"));
-    } catch (e) {
-        log(`[Search] Sayfa bağlamı etkileşimden önce kayboldu (${base}): ${e.message}`, "warn");
-        return [];
-    }
-
-    // Hangi selektörle ve hangi kapsamda sonuç çıkaracağımız: AJAX akışında
-    // SADECE #searchAjaxCallback kutusu; WordPress GET akışında tüm sayfa.
-    let resultSelector;
-
-    if (hasAjaxSearch) {
-        log(`[Search] AJAX araması (${base}): ${query}`, "system");
+    // 1) BİRİNCİL: WordPress GET araması — doğrudan sonuç sayfası
+    const searchUrl = `${base}/?s=${encodeURIComponent(query)}`;
+    log(`[Search] GET araması: ${searchUrl}`, "system");
+    const ok = await gotoResilient(page, searchUrl, "Search");
+    if (ok) {
         try {
-            await page.focus("#searchInp");
-            await page.evaluate(() => { const i = document.querySelector("#searchInp"); if (i) i.value = ""; });
-            await page.type("#searchInp", query, { delay: 50 });
-            await page.keyboard.press("Enter");
-            await page.evaluate(() => { const b = document.querySelector(".searchbtn"); if (b) b.click(); });
-        } catch (err) {
-            log(`[Search] AJAX giriş hatası: ${err.message}`, "warn");
+            const items = await page.evaluate(extractItems, 'a', "Dizipal Arama Sonucu", CONFIG.LOGO_URL);
+            if (items && items.length > 0) return items;
+        } catch (e) {
+            log(`[Search] GET çıkarım hatası: ${e.message}`, "warn");
         }
-        const populated = await page.waitForFunction(() => {
-            const el = document.querySelector("#searchAjaxCallback");
-            return el && el.style.display !== "none" && el.innerHTML.trim() !== "";
-        }, { timeout: 10000 }).then(() => true).catch(() => false);
-
-        // Kutu dolmadıysa ana sayfayı tarayıp alakasız sonuç DÖNDÜRME; boş dön ki
-        // retry / diğer domain devreye girsin.
-        if (!populated) {
-            log(`[Search] AJAX sonuç kutusu dolmadı, boş dönülüyor (${page.url()})`, "warn");
-            return [];
-        }
-        resultSelector = '#searchAjaxCallback a';
-    } else {
-        const searchUrl = `${base}/?s=${encodeURIComponent(query)}`;
-        log(`[Search] WordPress GET araması: ${searchUrl}`, "system");
-        const ok2 = await gotoResilient(page, searchUrl, "Search");
-        if (!ok2) return [];
-        // Tüm <a>'lar; kök-seviye film sonuçları (/state-of-fear/) da yakalansın.
-        // Geçerlilik/poster filtresi extractItems içinde.
-        resultSelector = 'a';
     }
 
-    // Katalog ile aynı çıkarım mantığı (tek kaynak, drift yok).
+    // 2) YEDEK: custom AJAX layout (#searchInp) — sadece GET boş dönerse ve varsa
+    let hasAjax = false;
+    try { hasAjax = await page.evaluate(() => !!document.querySelector("#searchInp")); } catch (e) { return []; }
+    if (!hasAjax) return [];
+
+    log(`[Search] AJAX araması (yedek): ${query}`, "system");
     try {
-        return await page.evaluate(extractItems, resultSelector, "Dizipal Arama Sonucu", CONFIG.LOGO_URL);
+        await page.focus("#searchInp");
+        await page.evaluate(() => { const i = document.querySelector("#searchInp"); if (i) i.value = ""; });
+        await page.type("#searchInp", query, { delay: 50 });
+        await page.keyboard.press("Enter");
+        await page.evaluate(() => { const b = document.querySelector(".searchbtn"); if (b) b.click(); });
+    } catch (err) {
+        log(`[Search] AJAX giriş hatası: ${err.message}`, "warn");
+    }
+    const populated = await page.waitForFunction(() => {
+        const el = document.querySelector("#searchAjaxCallback");
+        return el && el.style.display !== "none" && el.innerHTML.trim() !== "";
+    }, { timeout: 10000 }).then(() => true).catch(() => false);
+    if (!populated) return [];
+
+    try {
+        return await page.evaluate(extractItems, '#searchAjaxCallback a', "Dizipal Arama Sonucu", CONFIG.LOGO_URL);
     } catch (e) {
-        log(`[Search] Sonuç çıkarımı sırasında bağlam kayboldu (${base}): ${e.message}`, "warn");
         return [];
     }
 }
