@@ -320,6 +320,30 @@ async function findCurrentDizipalDomain() {
         } else {
             log(`[Auto-Domain] Yeni adres bulunamadı, mevcut adres kullanılıyor.`, "warn");
         }
+
+        // Bulunan ana domain Cloudflare managed challenge veriyorsa (bazı ağlar/ISS'ler),
+        // TÜM zincir (katalog, arama, meta, m3u8 — hepsi CONFIG.BASE_URL kullanır) çalışan
+        // .bid mirror'ına düşürülür. Böylece streaming CF duvarına takılmaz.
+        if (CONFIG.MIRROR_URL && CONFIG.BASE_URL !== CONFIG.MIRROR_URL) {
+            try {
+                await page.goto(CONFIG.BASE_URL, { waitUntil: "domcontentloaded", timeout: 20000 });
+                await new Promise(r => setTimeout(r, 1500));
+                const challenged = await page.evaluate(() =>
+                    !!(window._cf_chl_opt || /just a moment|challenge-platform|cf-browser-verification/i.test(
+                        document.title + (document.body ? document.body.innerText.slice(0, 200) : "")))
+                ).catch(() => true);
+                if (challenged || page.url() === "about:blank") {
+                    log(`[Auto-Domain] Ana domain (${CONFIG.BASE_URL}) Cloudflare challenge veriyor → mirror'a düşülüyor: ${CONFIG.MIRROR_URL}`, "warn");
+                    CONFIG.BASE_URL = CONFIG.MIRROR_URL;
+                } else {
+                    log(`[Auto-Domain] Ana domain doğrulandı (challenge yok): ${CONFIG.BASE_URL}`, "system");
+                }
+            } catch (e) {
+                log(`[Auto-Domain] Ana domain doğrulanamadı (${e.message}) → mirror kullanılacak: ${CONFIG.MIRROR_URL}`, "warn");
+                CONFIG.BASE_URL = CONFIG.MIRROR_URL;
+            }
+        }
+
         await page.close().catch(()=> { });
     } catch (e) {
         log(`[Auto-Domain] Hata: ${e.message}`, "error");

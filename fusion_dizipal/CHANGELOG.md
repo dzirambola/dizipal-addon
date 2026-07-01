@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.4.1] - 2026-07-01
+### Fixed
+- **Route the entire streaming chain to the working mirror when the main domain is Cloudflare-walled**: v2.4.0 fixed catalog via .bid, but streaming still failed because meta + episode-resolution + m3u8 scraping all use `CONFIG.BASE_URL`, which auto-domain set to the Cloudflare-challenged main domain (dizipal1559). Verified locally that `.bid` fully serves streaming (scrapeMeta resolves 18 episodes via the `/dizi/` WordPress fallback, and scrapeM3U8 captures a valid `master.m3u8`). Auto-domain now probes the discovered main domain for a Cloudflare challenge and, if challenged (or unreachable), sets `BASE_URL` to the mirror — so the whole chain (catalog, search, meta, m3u8, proxy) runs on the domain that actually works. Environments where the main domain is reachable are unaffected (verified: no false-positive fallback).
+
 ## [2.4.0] - 2026-07-01
 ### Changed
 - **Prefer the working `.bid` mirror; the rotating main domain is Cloudflare-walled**: Network diagnosis from the HA host (residential Turk Telekom IP, Istanbul) showed the rotating main domain (`dizipal1559`) returns HTTP 403 "Just a moment" (Cloudflare **managed challenge**) that the browser can't pass from this environment, while the fixed WordPress mirror `dizipal.bid` returns HTTP 200 with no challenge. The earlier headful/Xvfb and disable-devtool work was chasing the wrong layer — the blocker is Cloudflare on the main domain, not headless detection. Catalog/search now try `mirror_url` (.bid) **first** and only fall back to the main domain.
