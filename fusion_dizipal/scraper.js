@@ -203,12 +203,17 @@ async function scrapeM3U8(pageUrl, forceRefresh = false) {
             }
         }
 
-        if (url.includes(".m3u8")) { 
+        if (url.includes(".m3u8")) {
             const duration = ((Date.now() - startTime) / 1000).toFixed(1);
             log(`Link yakalandı: ${url.split('?')[0]} (${duration}s)`, "info");
-            clearTimeout(timeout); 
+            clearTimeout(timeout);
+            // CDN anti-hotlink kontrolü için oynatıcının GÖNDERDİĞİ gerçek Referer/Origin'i
+            // yakala (genelde embed player origin'i, dizipal değil). Proxy bunu kullanır.
+            const h = req.headers();
+            const referer = h.referer || h.Referer || "";
+            const origin = h.origin || h.Origin || (referer ? new URL(referer).origin : "");
             req.abort().catch(() => {});
-            resolve(url);
+            resolve({ url, referer, origin });
             return;
         }
 
@@ -232,7 +237,20 @@ async function scrapeM3U8(pageUrl, forceRefresh = false) {
       })();
     });
 
-    const resultData = { url: m3u8Url, subtitles };
+    // CDN anti-hotlink cookie de isteyebiliyor — oynatıcının oturum cookie'lerini yakala
+    // ve CDN host'una göre cache'le (proxy segment isteklerinde host üzerinden bulur;
+    // URL'e cookie gömmeyiz, playlist şişmesin).
+    let cookie = "";
+    try {
+        const cks = await page.cookies(m3u8Url.url, m3u8Url.referer || CONFIG.BASE_URL);
+        cookie = cks.map(c => `${c.name}=${c.value}`).join("; ");
+        if (cookie) {
+            const cdnHost = new URL(m3u8Url.url).host;
+            cacheSet(`cdn_ctx:${cdnHost}`, { cookie, referer: m3u8Url.referer, origin: m3u8Url.origin }, 6 * 60 * 60 * 1000);
+        }
+    } catch (e) { /* cookie alınamazsa referer/origin ile devam */ }
+
+    const resultData = { url: m3u8Url.url, referer: m3u8Url.referer, origin: m3u8Url.origin, cookie, subtitles };
     cacheSet(cacheKey, resultData);
     return resultData;
 

@@ -91,6 +91,9 @@ async function proxyStream(req, res) {
   let targetUrl = req.query.url;
   const id = req.query.id;
   let isRetrying = false;
+  // CDN'in beklediği gerçek Referer: rewrite edilmiş alt-URL'lerde ?ref= ile taşınır,
+  // ilk istekte ise stream_data cache'inden (scrapeM3U8'in yakaladığı) gelir.
+  let cdnReferer = req.query.ref || "";
 
   try {
       if (id && !targetUrl) {
@@ -98,15 +101,31 @@ async function proxyStream(req, res) {
          const cachedData = cacheGet(`stream_data:${dUrl}`);
          if (cachedData && cachedData.url) {
              targetUrl = cachedData.url;
+             cdnReferer = cdnReferer || cachedData.referer;
          } else {
              const freshData = await fetchFreshUrl(id);
              targetUrl = freshData.url;
+             cdnReferer = cdnReferer || (freshData && freshData.referer);
          }
       }
   } catch(e) {
       log(`Proxy URL çözümleme hatası: ${e.message}`, "error");
       return res.status(500).send("URL çözümlenemedi.");
   }
+
+  if (!cdnReferer) cdnReferer = CONFIG.BASE_URL + "/";
+  let cdnOrigin = CONFIG.BASE_URL;
+  try { cdnOrigin = new URL(cdnReferer).origin; } catch (e) {}
+
+  // Hedef URL'nin host'una göre CDN bağlamını (cookie/referer/origin) getir.
+  // scrapeM3U8 yakalarken `cdn_ctx:<host>` altına yazıyor.
+  const cdnHeaders = (u) => {
+    let ctx = {};
+    try { ctx = cacheGet(`cdn_ctx:${new URL(u).host}`) || {}; } catch (e) {}
+    const h = { "User-Agent": CONFIG.UA, "Referer": ctx.referer || cdnReferer, "Origin": ctx.origin || cdnOrigin };
+    if (ctx.cookie) h["Cookie"] = ctx.cookie;
+    return h;
+  };
 
   // HLS zinciri: playlist (.m3u8) + segment/anahtar tipleri. Rewrite edilmiş
   // segmentler bizim proxy'den geçtiği için bunlara izin verilmeli.
@@ -120,7 +139,7 @@ async function proxyStream(req, res) {
     // Eğer resIndex varsa, master m3u8 içinden o çözünürlüğü seçip onun url'sini proxy yap
     if (req.query.resIndex !== undefined) {
         try {
-            const mRes = await fetch(targetUrl, { headers: { "User-Agent": CONFIG.UA, "Referer": CONFIG.BASE_URL + "/" }});
+            const mRes = await fetch(targetUrl, { headers: cdnHeaders(targetUrl) });
             if (mRes.ok) {
                 const content = await mRes.text();
                 const lines = content.split('\n');
@@ -149,11 +168,11 @@ async function proxyStream(req, res) {
     // referer-korumalı CDN'den çekmeye çalışır ve "demuxing" hatası verir.
     if (targetUrl.toLowerCase().includes(".m3u8")) {
         try {
-            const r = await fetch(targetUrl, { headers: { "User-Agent": CONFIG.UA, "Referer": CONFIG.BASE_URL + "/", "Origin": CONFIG.BASE_URL }});
+            const r = await fetch(targetUrl, { headers: cdnHeaders(targetUrl) });
             if ((r.status === 403 || r.status === 401 || r.status === 410) && id && !isRetrying) {
                 isRetrying = true;
                 const fresh = await fetchFreshUrl(id, true).catch(() => null);
-                if (fresh && fresh.url) { log(`[Smart Proxy] Playlist expired, token yenilendi.`, "system"); return doProxy(fresh.url); }
+                if (fresh && fresh.url) { log(`[Smart Proxy] Playlist expired, token yenilendi.`, "system"); if (fresh.referer) cdnReferer = fresh.referer; return doProxy(fresh.url); }
                 return res.status(502).send("Playlist yenilenemedi.");
             }
             if (!r.ok) return res.status(r.status).send("Playlist alınamadı.");
@@ -161,7 +180,8 @@ async function proxyStream(req, res) {
             const origin = new URL(targetUrl).origin;
             const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
             const abs = (u) => u.startsWith("http") ? u : (u.startsWith("/") ? origin + u : baseUrl + u);
-            const prox = (u) => `http://${host}/proxy-stream?url=${encodeURIComponent(abs(u))}`;
+            const refQ = `&ref=${encodeURIComponent(cdnReferer)}`;
+            const prox = (u) => `http://${host}/proxy-stream?url=${encodeURIComponent(abs(u))}${refQ}`;
             const rewritten = content.split('\n').map(line => {
                 const t = line.trim();
                 if (!t) return line;
@@ -187,11 +207,7 @@ async function proxyStream(req, res) {
       port: parsedUrl.port || 443,
       path: parsedUrl.pathname + parsedUrl.search,
       method: "GET",
-      headers: {
-        "User-Agent": CONFIG.UA,
-        "Referer": CONFIG.BASE_URL + "/",
-        "Origin": CONFIG.BASE_URL
-      }
+      headers: cdnHeaders(targetUrl)
     };
 
     if (req.headers.range) {

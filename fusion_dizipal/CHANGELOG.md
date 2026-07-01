@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.4.5] - 2026-07-01
+### Changed
+- **Capture the player's real Referer/Origin/Cookie for the CDN; proxy rewrites playlists with them; proxy is now the primary stream**: scrapeM3U8 now records the exact Referer/Origin (and cookies, cached per CDN host as `cdn_ctx:<host>`) that the in-page player sent for the `.m3u8` request, and the proxy replays them on every playlist/segment fetch (rewriting HLS playlists so segments route back through the proxy). The internal proxy is the primary stream option; direct-m3u8 + proxyHeaders is the fallback.
+- **Known limitation**: the stream CDN (uk-traffic-076) appears to gate on the browser's TLS fingerprint (JA3), not just headers/cookies — server-side fetches (Node) get 403 regardless of Referer/Origin/Cookie, and external players fail on sub-resources. So playback of this CDN is still blocked; capturing the m3u8 works but delivering it needs a Chrome-TLS-impersonating fetch (e.g. curl-impersonate) — under evaluation.
+
 ## [2.4.4] - 2026-07-01
 ### Fixed
 - **Search no longer loads the heavy `.bid` homepage (was timing out ~90s)**: `searchOnce` used to `goto` the mirror homepage first (to detect the AJAX search box), but `.bid/`'s homepage (~6800 links) repeatedly hit the 25s navigation timeout on headful/ARM, so every watch request burned ~90s of retries before falling back — pushing the stream far past Stremio's timeout. Search now goes **directly to the WordPress GET results page** (`/?s=query`), which is light and loads in ~1-3s; the homepage AJAX flow is kept only as a fallback for the custom layout. Local: "The Bear" 2.6s, "Little Brother" 1.5s (both previously timed out).

@@ -151,23 +151,32 @@ app.get("/stream/:type/:id.json", async (req, res) => {
     //     CDN'e kendi TLS'iyle bağlanır → Node proxy'nin 403'ünü atlar.
     //  2) YEDEK: dahili proxy (Range/CORS gerektiren oynatıcılar için).
     const binge = `dizipal-binge-${cleanId.split(':')[0]}`;
-    const proxyHeaders = { request: { "User-Agent": CONFIG.UA, "Referer": CONFIG.BASE_URL + "/", "Origin": CONFIG.BASE_URL } };
+    // CDN'in beklediği gerçek Referer/Origin/Cookie (oynatıcının yakalanan bağlamı).
+    const cdnRef = cachedData.referer || (CONFIG.BASE_URL + "/");
+    let cdnOrigin = CONFIG.BASE_URL;
+    try { cdnOrigin = cachedData.origin || new URL(cdnRef).origin; } catch (e) {}
+    const reqHeaders = { "User-Agent": CONFIG.UA, "Referer": cdnRef, "Origin": cdnOrigin };
+    if (cachedData.cookie) reqHeaders["Cookie"] = cachedData.cookie;
+    const proxyHeaders = { request: reqHeaders };
     const streams = [
-        {
-            name: "Dizipal\n▶ Doğrudan",
-            title: streamTitle,
-            description: `Kaynak: ${CONFIG.BASE_URL}\nDoğrudan yayın (harici oynatıcı)`,
-            url: cachedData.url,
-            subtitles,
-            behaviorHints: { notWebReady: true, bingeGroup: binge, proxyHeaders }
-        },
+        // 1) ANA: dahili proxy — playlist'i yeniden yazıp HER segmenti CDN'in beklediği
+        //    Referer + Cookie ile çeker (anti-hotlink'i aşmanın en tam yolu).
         {
             name: "Dizipal\n⇄ Proxy",
             title: streamTitle,
-            description: `Kaynak: ${CONFIG.BASE_URL}\nDahili proxy (yedek)`,
+            description: `Kaynak: ${CONFIG.BASE_URL}\nDahili proxy (önerilen)`,
             url: `http://${host}/proxy-stream?id=${encodeURIComponent(cleanId)}`,
             subtitles,
             behaviorHints: { notWebReady: true, bingeGroup: binge }
+        },
+        // 2) YEDEK: ham m3u8 + proxyHeaders — harici oynatıcı CDN'e doğrudan bağlanır.
+        {
+            name: "Dizipal\n▶ Doğrudan",
+            title: streamTitle,
+            description: `Kaynak: ${CONFIG.BASE_URL}\nDoğrudan (harici oynatıcı)`,
+            url: cachedData.url,
+            subtitles,
+            behaviorHints: { notWebReady: true, bingeGroup: binge, proxyHeaders }
         }
     ];
 
