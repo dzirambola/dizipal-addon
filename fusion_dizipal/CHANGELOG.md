@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.4.6] - 2026-07-01
+### Added
+- **curl-impersonate (Chrome JA3) for CDN fetches — the actual anti-hotlink bypass**: v2.4.5 confirmed the stream CDN blocks by TLS fingerprint, so Node/normal-curl always got 403. The Dockerfile now installs `curl-impersonate` (Chrome build, per-arch: x86_64/aarch64/armv7) and the proxy fetches every playlist + segment through it (replaying the captured Referer/Origin/Cookie), so the CDN sees a genuine Chrome TLS handshake. Playlists are still rewritten so segments route back through the proxy; if curl-impersonate isn't present (unsupported arch / download failed) the proxy falls back to Node fetch. This is the "⇄ Proxy" stream — expected to finally play the anti-hotlink CDN.
+
 ## [2.4.5] - 2026-07-01
 ### Changed
 - **Capture the player's real Referer/Origin/Cookie for the CDN; proxy rewrites playlists with them; proxy is now the primary stream**: scrapeM3U8 now records the exact Referer/Origin (and cookies, cached per CDN host as `cdn_ctx:<host>`) that the in-page player sent for the `.m3u8` request, and the proxy replays them on every playlist/segment fetch (rewriting HLS playlists so segments route back through the proxy). The internal proxy is the primary stream option; direct-m3u8 + proxyHeaders is the fallback.

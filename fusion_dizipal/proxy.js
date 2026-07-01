@@ -1,7 +1,48 @@
 const https = require("https");
+const fs = require("fs");
+const { spawn } = require("child_process");
 const { log, CONFIG } = require("./config");
 const { scrapeM3U8, fetchTitleInfo, toSlug } = require("./scraper");
 const { cacheGet } = require('./cache');
+
+// curl-impersonate (Chrome JA3 taklidi): CDN'ler Node/normal-curl TLS parmak izini
+// engelliyor. Varsa CDN isteklerini bununla yaparız; yoksa Node fetch/https'e düşeriz.
+const CURL_BIN = process.env.CURL_IMPERSONATE || "/opt/curl-impersonate/curl_chrome116";
+const CURL_OK = (() => { try { return fs.existsSync(CURL_BIN); } catch (e) { return false; } })();
+if (CURL_OK) log(`[Proxy] curl-impersonate aktif: ${CURL_BIN}`, "system");
+else log(`[Proxy] curl-impersonate bulunamadı, Node fetch kullanılacak`, "warn");
+
+function curlHeaderArgs(headers) {
+    const a = [];
+    for (const k of Object.keys(headers || {})) { if (headers[k]) a.push("-H", `${k}: ${headers[k]}`); }
+    return a;
+}
+
+// Playlist (metin) — tamponla, {ok, text} döndür.
+function curlText(url, headers) {
+    return new Promise((resolve) => {
+        const ps = spawn(CURL_BIN, ["-sS", "-L", "--max-time", "25", ...curlHeaderArgs(headers), url]);
+        const out = [];
+        ps.stdout.on("data", (d) => out.push(d));
+        ps.stderr.on("data", () => {});
+        ps.on("error", () => resolve({ ok: false, text: "" }));
+        ps.on("close", () => {
+            const text = Buffer.concat(out).toString("utf8");
+            resolve({ ok: text.includes("#EXTM3U"), text });
+        });
+    });
+}
+
+// Segment (binary) — stdout'u doğrudan response'a akıt.
+function curlStream(url, headers, res) {
+    const ps = spawn(CURL_BIN, ["-sS", "-L", "--max-time", "60", ...curlHeaderArgs(headers), url]);
+    let started = false;
+    ps.stdout.on("data", (d) => { if (!started) { started = true; if (!res.headersSent) res.writeHead(200); } res.write(d); });
+    ps.stderr.on("data", () => {});
+    ps.on("error", () => { if (!res.headersSent) res.status(502).end(); else res.end(); });
+    ps.on("close", () => { try { res.end(); } catch (e) {} });
+    res.on("close", () => { try { ps.kill(); } catch (e) {} });
+}
 
 async function getDizipalUrl(id) {
     const cleanId = id.replace(".json", "");
@@ -168,15 +209,23 @@ async function proxyStream(req, res) {
     // referer-korumalı CDN'den çekmeye çalışır ve "demuxing" hatası verir.
     if (targetUrl.toLowerCase().includes(".m3u8")) {
         try {
-            const r = await fetch(targetUrl, { headers: cdnHeaders(targetUrl) });
-            if ((r.status === 403 || r.status === 401 || r.status === 410) && id && !isRetrying) {
-                isRetrying = true;
-                const fresh = await fetchFreshUrl(id, true).catch(() => null);
-                if (fresh && fresh.url) { log(`[Smart Proxy] Playlist expired, token yenilendi.`, "system"); if (fresh.referer) cdnReferer = fresh.referer; return doProxy(fresh.url); }
-                return res.status(502).send("Playlist yenilenemedi.");
+            // curl-impersonate varsa onunla (JA3), yoksa Node fetch ile çek.
+            let content = null, failed = false;
+            if (CURL_OK) {
+                const cr = await curlText(targetUrl, cdnHeaders(targetUrl));
+                if (cr.ok) content = cr.text; else failed = true;
+            } else {
+                const r = await fetch(targetUrl, { headers: cdnHeaders(targetUrl) });
+                if (r.ok) content = await r.text(); else failed = true;
             }
-            if (!r.ok) return res.status(r.status).send("Playlist alınamadı.");
-            const content = await r.text();
+            if (failed || content === null) {
+                if (id && !isRetrying) {
+                    isRetrying = true;
+                    const fresh = await fetchFreshUrl(id, true).catch(() => null);
+                    if (fresh && fresh.url) { log(`[Smart Proxy] Playlist alınamadı, token yenilendi.`, "system"); if (fresh.referer) cdnReferer = fresh.referer; return doProxy(fresh.url); }
+                }
+                return res.status(502).send("Playlist alınamadı.");
+            }
             const origin = new URL(targetUrl).origin;
             const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
             const abs = (u) => u.startsWith("http") ? u : (u.startsWith("/") ? origin + u : baseUrl + u);
@@ -199,6 +248,13 @@ async function proxyStream(req, res) {
             if (!res.headersSent) return res.status(500).send("Playlist proxy hatası.");
             return;
         }
+    }
+
+    // SEGMENT (.ts vb.): curl-impersonate varsa onunla akıt (JA3 gerekli).
+    if (CURL_OK) {
+        const h = cdnHeaders(targetUrl);
+        if (req.headers.range) h["Range"] = req.headers.range;
+        return curlStream(targetUrl, h, res);
     }
 
     const parsedUrl = new URL(targetUrl);
