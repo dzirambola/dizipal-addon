@@ -99,18 +99,31 @@ function extractItems(selector, description, logoUrl) {
 // Bir sayfayı yükler; anti-bot about:blank yönlendirmesini tespit edip retry'lar.
 // İçerik bulununca true, hiç bulunamazsa false döner.
 async function gotoResilient(page, url, label) {
+    let resp;
     try {
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+        resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 });
     } catch (e) {
         log(`[${label}] goto hatası (${url}): ${e.message}`, "warn");
         return false;
     }
-    // disable-devtool bazen sayfayı yükledikten kısa süre sonra about:blank'e atar.
+    const status = resp ? resp.status() : "?";
+    // Cloudflare managed challenge tespiti (403/503 + "Just a moment" gövdesi).
+    let challenged = false;
+    try {
+        challenged = await page.evaluate(() =>
+            !!(window._cf_chl_opt || /just a moment|challenge-platform|cf-browser-verification/i.test(document.title + document.body?.innerText?.slice(0, 200)))
+        );
+    } catch (e) { /* bağlam yoksa aşağıda about:blank yakalanır */ }
+
+    log(`[${label}] yüklendi: HTTP ${status}, url=${page.url()}${challenged ? " ⚠️ CLOUDFLARE CHALLENGE" : ""}`, "system");
+
+    // disable-devtool / challenge bazen sayfayı about:blank'e atar.
     await new Promise(r => setTimeout(r, 600));
     if (page.url() === "about:blank") {
-        log(`[${label}] Anti-bot about:blank yönlendirmesi tespit edildi: ${url}`, "warn");
+        log(`[${label}] about:blank yönlendirmesi (${url})`, "warn");
         return false;
     }
+    if (challenged) return false; // challenge'lı sayfadan içerik çıkmaz; retry/diğer domain
     return true;
 }
 
@@ -120,7 +133,9 @@ async function scrapeCatalog(type) {
     if (cached) return cached;
 
     const path = type === "series" ? "/diziler/" : "/filmler/";
-    const bases = [...new Set([CONFIG.BASE_URL, CONFIG.MIRROR_URL].filter(Boolean))];
+    // MIRROR (.bid, WordPress) ÖNCE denenir: ana rotasyon domaini (dizipalNNN)
+    // çoğu ağdan Cloudflare managed challenge veriyor; .bid mirror'ı temiz çalışıyor.
+    const bases = [...new Set([CONFIG.MIRROR_URL, CONFIG.BASE_URL].filter(Boolean))];
     const browser = await getBrowser();
 
     // Her domain için about:blank'e karşı 3 deneme; biri içerik verene kadar dene.
@@ -230,7 +245,9 @@ async function scrapeSearch(query, type) {
     const cached = cacheGet(cacheKey);
     if (cached) return cached;
 
-    const bases = [...new Set([CONFIG.BASE_URL, CONFIG.MIRROR_URL].filter(Boolean))];
+    // MIRROR (.bid, WordPress) ÖNCE denenir: ana rotasyon domaini (dizipalNNN)
+    // çoğu ağdan Cloudflare managed challenge veriyor; .bid mirror'ı temiz çalışıyor.
+    const bases = [...new Set([CONFIG.MIRROR_URL, CONFIG.BASE_URL].filter(Boolean))];
     const browser = await getBrowser();
 
     for (const base of bases) {

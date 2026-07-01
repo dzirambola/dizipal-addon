@@ -273,7 +273,9 @@ async function findCurrentDizipalDomain() {
         // 1inci Aşama: Mirror adresini kontrol et
         try {
             log(`[Auto-Domain] 1. Mirror (${CONFIG.MIRROR_URL}) test ediliyor...`, "system");
-            await page.goto(CONFIG.MIRROR_URL, { waitUntil: "networkidle2", timeout: 15000 });
+            // networkidle2 .bid'in reklam/tracker trafiği yüzünden hep timeout veriyordu;
+            // domcontentloaded yeterli (sayfa 1-2sn'de yükleniyor).
+            await page.goto(CONFIG.MIRROR_URL, { waitUntil: "domcontentloaded", timeout: 20000 });
             newUrl = page.url();
             
             // Eğer otomatik yönlenmediyse sayfadaki linklere bak

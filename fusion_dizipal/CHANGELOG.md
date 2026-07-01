@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.0] - 2026-07-01
+### Changed
+- **Prefer the working `.bid` mirror; the rotating main domain is Cloudflare-walled**: Network diagnosis from the HA host (residential Turk Telekom IP, Istanbul) showed the rotating main domain (`dizipal1559`) returns HTTP 403 "Just a moment" (Cloudflare **managed challenge**) that the browser can't pass from this environment, while the fixed WordPress mirror `dizipal.bid` returns HTTP 200 with no challenge. The earlier headful/Xvfb and disable-devtool work was chasing the wrong layer — the blocker is Cloudflare on the main domain, not headless detection. Catalog/search now try `mirror_url` (.bid) **first** and only fall back to the main domain.
+  - `gotoResilient` now logs the HTTP status + final URL and detects Cloudflare challenge (`_cf_chl_opt` / "Just a moment"), returning early so it doesn't try to scrape a challenge page; goto timeout raised to 25s.
+  - Auto-domain mirror probe switched from `networkidle2` (which always timed out on .bid's ad/tracker traffic) to `domcontentloaded`.
+  - Catalog browsing now works from HA via .bid. Search/streaming resolution is still limited: the main domain's good AJAX search is Cloudflare-blocked and the .bid WordPress search is weak — under investigation with the new per-domain diagnostics.
+
 ## [2.3.9] - 2026-07-01
 ### Changed
 - **Force headful + diagnostics**: v2.3.8 headful/Xvfb still hit `Execution context was destroyed` on HA, so this release removes remaining unknowns. `headless` is now forced off in code (a carried-over `headless: true` saved option can no longer keep the browser headless). Added startup diagnostics logging the actual browser mode and `DISPLAY` (confirms Xvfb is active), and a `framenavigated` logger in search that records exactly where the page redirects to — evidence needed to tell an anti-bot `about:blank` redirect apart from a normal site navigation.
