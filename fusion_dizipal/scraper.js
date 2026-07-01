@@ -268,8 +268,34 @@ async function findCurrentDizipalDomain() {
             }
         });
         
+        // ── ÖNCELİK: Çalışan .bid mirror ─────────────────────────────────────
+        // Rotasyon domaini (dizipalNNN) Cloudflare managed challenge veriyor ve
+        // scrape'te about:blank'e çöküyor. Stabil .bid mirror'ı içerik döndürdüğü
+        // sürece rotasyon domaini HİÇ aranmaz (kullanıcı isteği + hız).
+        const mirror = (CONFIG.MIRROR_URL || "https://dizipal.bid").replace(/\/$/, "");
+        for (let i = 0; i < 3; i++) {
+            try {
+                await page.goto(mirror + "/diziler/", { waitUntil: "domcontentloaded", timeout: 30000 });
+                await new Promise(r => setTimeout(r, 1000));
+                const ok = await page.evaluate(() =>
+                    document.querySelectorAll('a[href*="/dizi/"], a[href*="/series/"]').length > 0
+                ).catch(() => false);
+                if (ok) {
+                    if (CONFIG.BASE_URL !== mirror) {
+                        log(`[Auto-Domain] Mirror modu: ${mirror} kullanılıyor (rotasyon domaini aranmıyor).`, "system");
+                        CONFIG.BASE_URL = mirror;
+                    } else {
+                        log(`[Auto-Domain] Mirror (${mirror}) doğrulandı.`, "system");
+                    }
+                    await page.close().catch(() => {});
+                    return CONFIG.BASE_URL;
+                }
+            } catch (e) { /* soğuk başlangıç yavaş olabilir, tekrar dene */ }
+        }
+        log(`[Auto-Domain] Mirror (${mirror}) yanıt vermedi → rotasyon domaini aranıyor (fallback).`, "warn");
+
         let newUrl = null;
-        
+
         // 1inci Aşama: Mirror adresini kontrol et
         try {
             log(`[Auto-Domain] 1. Mirror (${CONFIG.MIRROR_URL}) test ediliyor...`, "system");

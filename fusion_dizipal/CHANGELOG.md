@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.3] - 2026-07-01
+### Changed
+- **`.bid`-only mode + faster stream resolution + playback via direct+proxyHeaders**:
+  - **Mirror-only**: default `base_url`/`mirror_url` are now `dizipal.bid` and auto-domain verifies the mirror's content and returns immediately — the Cloudflare-walled rotating main domain (dizipal1559) is no longer probed or searched at all (only used as a fallback if `.bid` is ever down).
+  - **Latency**: `/stream` resolved the episode URL twice (getDizipalUrl was called again inside fetchFreshUrl), doubling the heavy Puppeteer work and pushing total time past Stremio's timeout so the link "appeared too late". It now resolves once and reuses the URL.
+  - **Playback**: the stream CDN (e.g. uk-traffic) returns 403 to any server-side fetch (anti-hotlink) — only the in-page player can load it — so the internal Node proxy produced a "demuxing" error. The primary stream is now the **direct m3u8 URL with `behaviorHints.proxyHeaders`** (Referer/UA) so an external player (VLC/Infuse) connects to the CDN itself and bypasses the Node 403; the internal proxy is kept as a labelled fallback, and now rewrites HLS playlists so segments route through it.
+
 ## [2.4.2] - 2026-07-01
 ### Fixed
 - **Reliably pin the whole chain to the working `.bid` mirror**: v2.4.1's "is the main domain challenged?" probe was unreliable — the main domain's homepage often loads clean at probe time, so it stayed on `dizipal1559`, then failed during the actual scrape (`Yayın linki bulunamadı`). Replaced the flaky challenge check with a positive **content verification**: auto-domain loads `mirror/diziler/` (up to 3 tries, 30s each to absorb cold-start slowness on headful/ARM) and, if it returns real content links, pins `BASE_URL` to the mirror for the whole chain. Verified end-to-end locally: auto-domain → `BASE=.bid` → search resolves → scrapeMeta returns episodes → scrapeM3U8 captures a valid `master.m3u8`.

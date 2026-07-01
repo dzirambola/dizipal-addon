@@ -1,6 +1,6 @@
 name: "Dizipal"
 description: "Dizipal içerik görüntüleme add-on"
-version: "2.4.2"
+version: "2.4.3"
 slug: fusion_dizipal
 
 arch:
@@ -24,7 +24,7 @@ panel_icon: mdi:play-box-outline
 panel_title: Dizipal
 
 options:
-  base_url: "https://dizipal1558.com"
+  base_url: "https://dizipal.bid"
   mirror_url: "https://dizipal.bid"
   port: 7860
   cache_ttl_hours: 12

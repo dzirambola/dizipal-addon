@@ -108,9 +108,13 @@ async function proxyStream(req, res) {
       return res.status(500).send("URL çözümlenemedi.");
   }
 
-  if (!targetUrl || (!targetUrl.includes(".m3u8") && !targetUrl.includes(".ts"))) {
+  // HLS zinciri: playlist (.m3u8) + segment/anahtar tipleri. Rewrite edilmiş
+  // segmentler bizim proxy'den geçtiği için bunlara izin verilmeli.
+  if (!targetUrl || !/\.(m3u8|ts|m4s|mp4|aac|mp3|key|vtt|webvtt)(\?|#|$)/i.test(targetUrl)) {
     return res.status(403).send("Geçersiz veya engellenmiş URL isteği.");
   }
+
+  const host = req.get('host');
 
   const doProxy = async (targetUrl) => {
     // Eğer resIndex varsa, master m3u8 içinden o çözünürlüğü seçip onun url'sini proxy yap
@@ -137,6 +141,43 @@ async function proxyStream(req, res) {
             }
         } catch(e) {
             log(`Proxy resIndex ayrıştırma hatası: ${e.message}`, "warn");
+        }
+    }
+
+    // m3u8 PLAYLIST ise: içindeki alt-playlist ve segment URL'lerini bizim proxy'ye
+    // yönlendirecek şekilde YENİDEN YAZ. Aksi halde oynatıcı segmentleri doğrudan
+    // referer-korumalı CDN'den çekmeye çalışır ve "demuxing" hatası verir.
+    if (targetUrl.toLowerCase().includes(".m3u8")) {
+        try {
+            const r = await fetch(targetUrl, { headers: { "User-Agent": CONFIG.UA, "Referer": CONFIG.BASE_URL + "/", "Origin": CONFIG.BASE_URL }});
+            if ((r.status === 403 || r.status === 401 || r.status === 410) && id && !isRetrying) {
+                isRetrying = true;
+                const fresh = await fetchFreshUrl(id, true).catch(() => null);
+                if (fresh && fresh.url) { log(`[Smart Proxy] Playlist expired, token yenilendi.`, "system"); return doProxy(fresh.url); }
+                return res.status(502).send("Playlist yenilenemedi.");
+            }
+            if (!r.ok) return res.status(r.status).send("Playlist alınamadı.");
+            const content = await r.text();
+            const origin = new URL(targetUrl).origin;
+            const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
+            const abs = (u) => u.startsWith("http") ? u : (u.startsWith("/") ? origin + u : baseUrl + u);
+            const prox = (u) => `http://${host}/proxy-stream?url=${encodeURIComponent(abs(u))}`;
+            const rewritten = content.split('\n').map(line => {
+                const t = line.trim();
+                if (!t) return line;
+                if (t.startsWith("#")) {
+                    // URI="..." içeren tag'ler (EXT-X-KEY / EXT-X-MEDIA / EXT-X-MAP)
+                    return line.replace(/URI="([^"]+)"/g, (_m, u) => `URI="${prox(u)}"`);
+                }
+                return prox(t); // segment veya alt-playlist satırı
+            }).join('\n');
+            res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            return res.send(rewritten);
+        } catch (e) {
+            log(`Playlist proxy/rewrite hatası: ${e.message}`, "error");
+            if (!res.headersSent) return res.status(500).send("Playlist proxy hatası.");
+            return;
         }
     }
 

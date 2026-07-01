@@ -9,8 +9,8 @@ try {
 }
 
 const CONFIG = {
-  VERSION: "2.4.2",
-  BASE_URL: opts.base_url || "https://dizipal1558.com",
+  VERSION: "2.4.3",
+  BASE_URL: opts.base_url || "https://dizipal.bid",
   MIRROR_URL: opts.mirror_url || "https://dizipal.bid",
   PORT: Number(process.env.PORT || opts.port || 7860),
   TIMEOUT_MS: Number(opts.timeout_ms || 45000),

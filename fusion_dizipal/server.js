@@ -121,16 +121,22 @@ app.get("/stream/:type/:id.json", async (req, res) => {
     log(`İzleme İsteği: ${title || cleanId}`, "info");
 
     const host = req.get('host');
-    const { getDizipalUrl, fetchFreshUrl, getResolutions } = require('./proxy'); 
+    const { getDizipalUrl } = require('./proxy');
+    const { scrapeM3U8 } = require('./scraper');
     const { cacheGet } = require('./cache');
-    
+
+    // Bölüm/film sayfa URL'sini BİR KEZ çöz (arama+meta ağır Puppeteer işi);
+    // ardından aynı URL ile m3u8 çek — getDizipalUrl'i ikinci kez çağırma.
     const dUrl = await getDizipalUrl(cleanId);
     let cachedData = cacheGet(`stream_data:${dUrl}`);
-    
+
     // Altyazıları Stremio'ya anında iletmek için ön yükleme yap
     if (!cachedData) {
         log(`Altyazı ve önbellek için yayın hazırlanıyor...`, "info");
-        cachedData = await fetchFreshUrl(cleanId);
+        cachedData = await scrapeM3U8(dUrl);
+    }
+    if (!cachedData || !cachedData.url) {
+        throw new Error("Yayın linki bulunamadı.");
     }
     
     let subtitles = [];
@@ -139,37 +145,31 @@ app.get("/stream/:type/:id.json", async (req, res) => {
         log(`${subtitles.length} adet altyazı stream'e eklendi.`, "info");
     }
 
-    // AŞAMA 4: Çözünürlükleri Parçala (1080p, 720p vs)
-    let resolutions = await getResolutions(cachedData.url);
-    let streams = [];
-    
-    if (resolutions && resolutions.length > 0) {
-        streams = resolutions.map(resObj => {
-            return {
-                name: `Dizipal\n${resObj.resolution}`,
-                title: streamTitle,
-                description: `Kaynak: ${CONFIG.BASE_URL}`,
-                url: `http://${host}/proxy-stream?id=${encodeURIComponent(cleanId)}&resIndex=${resObj.index}`,
-                subtitles: subtitles,
-                behaviorHints: { 
-                    notWebReady: true,
-                    bingeGroup: `dizipal-binge-${cleanId.split(':')[0]}`
-                }
-            };
-        });
-    } else {
-        streams.push({
-            name: "Dizipal\nOto",
+    // Yayın CDN'i (uk-traffic vb.) sunucu-taraflı fetch'e 403 veriyor (anti-hotlink);
+    // sadece oynatıcının kendisi yükleyebiliyor. Bu yüzden:
+    //  1) ANA seçenek: ham m3u8 + proxyHeaders (Referer). Harici oynatıcı (VLC/Infuse)
+    //     CDN'e kendi TLS'iyle bağlanır → Node proxy'nin 403'ünü atlar.
+    //  2) YEDEK: dahili proxy (Range/CORS gerektiren oynatıcılar için).
+    const binge = `dizipal-binge-${cleanId.split(':')[0]}`;
+    const proxyHeaders = { request: { "User-Agent": CONFIG.UA, "Referer": CONFIG.BASE_URL + "/", "Origin": CONFIG.BASE_URL } };
+    const streams = [
+        {
+            name: "Dizipal\n▶ Doğrudan",
             title: streamTitle,
-            description: `Kaynak: ${CONFIG.BASE_URL}\nOtomatik Kalite`,
+            description: `Kaynak: ${CONFIG.BASE_URL}\nDoğrudan yayın (harici oynatıcı)`,
+            url: cachedData.url,
+            subtitles,
+            behaviorHints: { notWebReady: true, bingeGroup: binge, proxyHeaders }
+        },
+        {
+            name: "Dizipal\n⇄ Proxy",
+            title: streamTitle,
+            description: `Kaynak: ${CONFIG.BASE_URL}\nDahili proxy (yedek)`,
             url: `http://${host}/proxy-stream?id=${encodeURIComponent(cleanId)}`,
-            subtitles: subtitles,
-            behaviorHints: { 
-                notWebReady: true,
-                bingeGroup: `dizipal-binge-${cleanId.split(':')[0]}`
-            }
-        });
-    }
+            subtitles,
+            behaviorHints: { notWebReady: true, bingeGroup: binge }
+        }
+    ];
 
     res.json({ streams });
   } catch (err) {
