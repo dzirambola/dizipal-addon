@@ -57,6 +57,7 @@ async function getBrowser() {
             args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--no-zygote", "--disable-gpu", "--window-size=1280,1024"]
           });
           _browser.on('disconnected', () => { _browser = null; });
+          log(`Tarayıcı hazır — mode: ${CONFIG.HEADLESS === false ? 'HEADFUL' : 'headless'}, DISPLAY=${process.env.DISPLAY || 'YOK'}`, "system");
       } catch (err) {
           log(`Tarayıcı başlatılamadı: ${err.message}`, "error");
           _browser = null;

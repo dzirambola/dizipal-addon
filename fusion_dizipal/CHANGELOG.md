@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.3.9] - 2026-07-01
+### Changed
+- **Force headful + diagnostics**: v2.3.8 headful/Xvfb still hit `Execution context was destroyed` on HA, so this release removes remaining unknowns. `headless` is now forced off in code (a carried-over `headless: true` saved option can no longer keep the browser headless). Added startup diagnostics logging the actual browser mode and `DISPLAY` (confirms Xvfb is active), and a `framenavigated` logger in search that records exactly where the page redirects to — evidence needed to tell an anti-bot `about:blank` redirect apart from a normal site navigation.
+
 ## [2.3.8] - 2026-06-30
 ### Changed
 - **Headful Chromium under Xvfb (architectural anti-bot fix)**: The `disable-devtool` protection on dizipal1559 kept defeating the headless bypasses (window-size mock, service-worker block, settle wait) specifically in the HA Debian-chromium environment, redirecting the page mid-scrape and throwing `Execution context was destroyed`. Rather than chase another headless-detection vector, the add-on now runs Chromium **headful** inside a virtual display (Xvfb), which makes the browser indistinguishable from a real GUI session and neutralizes headless heuristics at the root.

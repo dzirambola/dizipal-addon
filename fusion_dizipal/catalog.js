@@ -158,6 +158,11 @@ async function scrapeCatalog(type) {
 
 // Tek bir domain üzerinde aramayı dener (AJAX veya WordPress GET). Sonuç dizisi döner.
 async function searchOnce(page, base, query) {
+    // TANI: ana çerçeve her gezindiğinde nereye gittiğini logla (redirect hedefi).
+    page.on('framenavigated', (frame) => {
+        if (frame === page.mainFrame()) log(`[Search][nav] → ${frame.url()}`, "system");
+    });
+
     const ok = await gotoResilient(page, base, `Search`);
     if (!ok) return [];
 
